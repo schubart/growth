@@ -35,6 +35,9 @@ struct DgApp {
     edge_regularization_enabled: bool,
     target_edge_length: f64,
     edge_stiffness: f64,
+    repulsion_enabled: bool,
+    repulsion_radius: f64,
+    repulsion_strength: f64,
     jitter_enabled: bool,
     jitter_strength: f64,
     auto_step: bool,
@@ -54,6 +57,9 @@ impl Default for DgApp {
             edge_regularization_enabled: true,
             target_edge_length: regular_ngon_edge_length(1.0, 32),
             edge_stiffness: 0.2,
+            repulsion_enabled: true,
+            repulsion_radius: 0.15,
+            repulsion_strength: 0.01,
             jitter_enabled: true,
             jitter_strength: 0.005,
             auto_step: false,
@@ -95,6 +101,32 @@ impl DgApp {
                     let correction = dir * (error * self.edge_stiffness * 0.5);
                     delta[i] += correction;
                     delta[j] -= correction;
+                }
+            }
+        }
+
+        if self.repulsion_enabled && self.repulsion_strength > 0.0 && self.repulsion_radius > 0.0 {
+            let radius_sq = self.repulsion_radius * self.repulsion_radius;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if are_neighbors(i, j, n) {
+                        continue;
+                    }
+
+                    let d = positions[j] - positions[i];
+                    let dist_sq = d.length_squared();
+                    if dist_sq <= 1e-18 || dist_sq >= radius_sq {
+                        continue;
+                    }
+
+                    let dist = dist_sq.sqrt();
+                    let dir = d / dist;
+                    let proximity = 1.0 - dist / self.repulsion_radius;
+                    let mag = self.repulsion_strength * proximity;
+                    let push = dir * (mag * 0.5);
+
+                    delta[i] -= push;
+                    delta[j] += push;
                 }
             }
         }
@@ -205,6 +237,18 @@ impl eframe::App for DgApp {
                 }
 
                 ui.separator();
+                ui.checkbox(&mut self.repulsion_enabled, "Self Repulsion");
+                ui.add(
+                    egui::Slider::new(&mut self.repulsion_radius, 0.0001..=2.0)
+                        .logarithmic(true)
+                        .text("Repulsion Radius"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.repulsion_strength, 0.0..=0.1)
+                        .text("Repulsion Strength"),
+                );
+
+                ui.separator();
                 ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
                 ui.add(
                     egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
@@ -226,6 +270,9 @@ impl eframe::App for DgApp {
                     self.zoom_px_per_unit = 120.0;
                     self.edge_regularization_enabled = true;
                     self.edge_stiffness = 0.2;
+                    self.repulsion_enabled = true;
+                    self.repulsion_radius = 0.15;
+                    self.repulsion_strength = 0.01;
                     self.jitter_enabled = true;
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
@@ -297,6 +344,15 @@ fn average_edge_length(polygon: &Polygon) -> f64 {
         return 0.0;
     }
     polygon.perimeter() / n as f64
+}
+
+fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
+    if n < 2 || i == j {
+        return true;
+    }
+    let next_i = (i + 1) % n;
+    let prev_i = (i + n - 1) % n;
+    j == next_i || j == prev_i
 }
 
 #[derive(Debug, Clone)]
