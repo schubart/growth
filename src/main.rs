@@ -1,5 +1,6 @@
 use dg4::geometry::{Polygon, Vec2};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke};
+use std::f64::consts::PI;
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions::default();
@@ -31,6 +32,9 @@ struct DgApp {
     sides: usize,
     view_mode: ViewMode,
     zoom_px_per_unit: f64,
+    edge_regularization_enabled: bool,
+    target_edge_length: f64,
+    edge_stiffness: f64,
     jitter_enabled: bool,
     jitter_strength: f64,
     auto_step: bool,
@@ -47,6 +51,9 @@ impl Default for DgApp {
             sides: 32,
             view_mode: ViewMode::Fit,
             zoom_px_per_unit: 120.0,
+            edge_regularization_enabled: true,
+            target_edge_length: regular_ngon_edge_length(1.0, 32),
+            edge_stiffness: 0.2,
             jitter_enabled: true,
             jitter_strength: 0.005,
             auto_step: false,
@@ -63,17 +70,47 @@ impl Default for DgApp {
 impl DgApp {
     fn rebuild_polygon(&mut self) {
         self.polygon = Polygon::regular_ngon(self.radius, self.sides);
+        self.target_edge_length = regular_ngon_edge_length(self.radius, self.sides);
         self.generation = 0;
     }
 
     fn step_sim(&mut self) {
-        if self.jitter_enabled && self.jitter_strength > 0.0 {
-            for v in self.polygon.vertices_mut() {
-                let jx = self.rng.next_signed_unit() * self.jitter_strength;
-                let jy = self.rng.next_signed_unit() * self.jitter_strength;
-                *v += Vec2::new(jx, jy);
+        let n = self.polygon.len();
+        if n == 0 {
+            return;
+        }
+
+        let positions = self.polygon.vertices().to_vec();
+        let mut delta = vec![Vec2::ZERO; n];
+
+        if self.edge_regularization_enabled && self.edge_stiffness > 0.0 && self.target_edge_length > 0.0
+        {
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let d = positions[j] - positions[i];
+                let len = d.length();
+                if len > 1e-12 {
+                    let dir = d / len;
+                    let error = len - self.target_edge_length;
+                    let correction = dir * (error * self.edge_stiffness * 0.5);
+                    delta[i] += correction;
+                    delta[j] -= correction;
+                }
             }
         }
+
+        if self.jitter_enabled && self.jitter_strength > 0.0 {
+            for d in &mut delta {
+                let jx = self.rng.next_signed_unit() * self.jitter_strength;
+                let jy = self.rng.next_signed_unit() * self.jitter_strength;
+                *d += Vec2::new(jx, jy);
+            }
+        }
+
+        for (v, d) in self.polygon.vertices_mut().iter_mut().zip(delta) {
+            *v += d;
+        }
+
         self.generation = self.generation.saturating_add(1);
     }
 
@@ -154,6 +191,20 @@ impl eframe::App for DgApp {
 
                 ui.separator();
                 ui.heading("Simulation");
+                ui.checkbox(&mut self.edge_regularization_enabled, "Edge Regularization");
+                ui.add(
+                    egui::Slider::new(&mut self.target_edge_length, 0.0001..=2.0)
+                        .logarithmic(true)
+                        .text("Target Edge Length"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.edge_stiffness, 0.0..=1.0).text("Edge Stiffness"),
+                );
+                if ui.button("Set Target From Current Shape").clicked() {
+                    self.target_edge_length = average_edge_length(&self.polygon);
+                }
+
+                ui.separator();
                 ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
                 ui.add(
                     egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
@@ -173,6 +224,8 @@ impl eframe::App for DgApp {
                     self.sides = 32;
                     self.view_mode = ViewMode::Fit;
                     self.zoom_px_per_unit = 120.0;
+                    self.edge_regularization_enabled = true;
+                    self.edge_stiffness = 0.2;
                     self.jitter_enabled = true;
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
@@ -188,6 +241,10 @@ impl eframe::App for DgApp {
                 ui.separator();
                 ui.label(format!("Vertices: {}", self.polygon.len()));
                 ui.label(format!("Perimeter: {:.6}", self.polygon.perimeter()));
+                ui.label(format!(
+                    "Avg Edge Length: {:.6}",
+                    average_edge_length(&self.polygon)
+                ));
                 ui.label(format!("Generation: {}", self.generation));
                 if let Some(c) = self.polygon.centroid() {
                     ui.label(format!("Centroid: ({:.4}, {:.4})", c.x, c.y));
@@ -225,6 +282,21 @@ fn bounds(points: &[Vec2]) -> Option<(Vec2, Vec2)> {
     }
 
     Some((min, max))
+}
+
+fn regular_ngon_edge_length(radius: f64, sides: usize) -> f64 {
+    if radius <= 0.0 || sides < 3 {
+        return 0.0;
+    }
+    2.0 * radius * (PI / sides as f64).sin()
+}
+
+fn average_edge_length(polygon: &Polygon) -> f64 {
+    let n = polygon.len();
+    if n < 2 {
+        return 0.0;
+    }
+    polygon.perimeter() / n as f64
 }
 
 #[derive(Debug, Clone)]
