@@ -1,6 +1,6 @@
 use dg4::geometry::{Polygon, Vec2};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke};
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions::default();
@@ -38,6 +38,10 @@ struct DgApp {
     repulsion_enabled: bool,
     repulsion_radius: f64,
     repulsion_strength: f64,
+    swirl_enabled: bool,
+    swirl_strength: f64,
+    swirl_blades: usize,
+    show_swirl_overlay: bool,
     jitter_enabled: bool,
     jitter_strength: f64,
     auto_step: bool,
@@ -60,6 +64,10 @@ impl Default for DgApp {
             repulsion_enabled: true,
             repulsion_radius: 0.15,
             repulsion_strength: 0.01,
+            swirl_enabled: false,
+            swirl_strength: 0.01,
+            swirl_blades: 4,
+            show_swirl_overlay: true,
             jitter_enabled: true,
             jitter_strength: 0.005,
             auto_step: false,
@@ -131,6 +139,22 @@ impl DgApp {
             }
         }
 
+        if self.swirl_enabled && self.swirl_strength > 0.0 {
+            let center = positions.iter().copied().fold(Vec2::ZERO, |acc, p| acc + p) / n as f64;
+            for i in 0..n {
+                let radial = positions[i] - center;
+                let dist = radial.length();
+                if dist <= 1e-12 {
+                    continue;
+                }
+
+                let tangent = Vec2::new(-radial.y, radial.x) / dist;
+                let phase = TAU * self.swirl_blades as f64 * (i as f64 / n as f64);
+                let local_spin = phase.sin();
+                delta[i] += tangent * (self.swirl_strength * local_spin);
+            }
+        }
+
         if self.jitter_enabled && self.jitter_strength > 0.0 {
             for d in &mut delta {
                 let jx = self.rng.next_signed_unit() * self.jitter_strength;
@@ -146,7 +170,15 @@ impl DgApp {
         self.generation = self.generation.saturating_add(1);
     }
 
-    fn draw_polygon(ui: &mut egui::Ui, rect: Rect, polygon: &Polygon, view_mode: ViewMode, fixed_zoom: f64) {
+    fn draw_polygon(
+        ui: &mut egui::Ui,
+        rect: Rect,
+        polygon: &Polygon,
+        view_mode: ViewMode,
+        fixed_zoom: f64,
+        swirl_blades: usize,
+        show_swirl_overlay: bool,
+    ) {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, Color32::from_gray(20));
 
@@ -175,6 +207,11 @@ impl DgApp {
                 rect.center().y - local.y as f32,
             )
         };
+
+        if show_swirl_overlay {
+            let overlay_radius = 0.5 * width.max(height) * 1.15;
+            draw_swirl_overlay(&painter, to_screen, center, overlay_radius, swirl_blades.max(1));
+        }
 
         let mut points: Vec<Pos2> = polygon.vertices().iter().copied().map(to_screen).collect();
         if points.len() > 1 {
@@ -249,6 +286,12 @@ impl eframe::App for DgApp {
                 );
 
                 ui.separator();
+                ui.checkbox(&mut self.swirl_enabled, "Centroid Swirl (Experimental)");
+                ui.add(egui::Slider::new(&mut self.swirl_strength, 0.0..=0.1).text("Swirl Strength"));
+                ui.add(egui::Slider::new(&mut self.swirl_blades, 1..=16).text("Swirl Blades"));
+                ui.checkbox(&mut self.show_swirl_overlay, "Show Swirl Overlay");
+
+                ui.separator();
                 ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
                 ui.add(
                     egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
@@ -273,6 +316,10 @@ impl eframe::App for DgApp {
                     self.repulsion_enabled = true;
                     self.repulsion_radius = 0.15;
                     self.repulsion_strength = 0.01;
+                    self.swirl_enabled = false;
+                    self.swirl_strength = 0.01;
+                    self.swirl_blades = 4;
+                    self.show_swirl_overlay = true;
                     self.jitter_enabled = true;
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
@@ -308,7 +355,15 @@ impl eframe::App for DgApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_size();
             let (response, _painter) = ui.allocate_painter(available, Sense::hover());
-            Self::draw_polygon(ui, response.rect, &self.polygon, self.view_mode, self.zoom_px_per_unit);
+            Self::draw_polygon(
+                ui,
+                response.rect,
+                &self.polygon,
+                self.view_mode,
+                self.zoom_px_per_unit,
+                self.swirl_blades,
+                self.show_swirl_overlay,
+            );
         });
     }
 }
@@ -353,6 +408,37 @@ fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
     let next_i = (i + 1) % n;
     let prev_i = (i + n - 1) % n;
     j == next_i || j == prev_i
+}
+
+fn draw_swirl_overlay(
+    painter: &egui::Painter,
+    to_screen: impl Fn(Vec2) -> Pos2,
+    center: Vec2,
+    radius: f64,
+    blades: usize,
+) {
+    let sectors = blades * 2;
+    let arc_steps_per_sector = 10usize;
+
+    for s in 0..sectors {
+        let a0 = TAU * (s as f64) / (sectors as f64);
+        let a1 = TAU * ((s + 1) as f64) / (sectors as f64);
+        let ccw = s % 2 == 0;
+        let color = if ccw {
+            Color32::from_rgba_unmultiplied(40, 120, 255, 28)
+        } else {
+            Color32::from_rgba_unmultiplied(255, 120, 40, 28)
+        };
+
+        let mut pts = Vec::with_capacity(arc_steps_per_sector + 2);
+        pts.push(to_screen(center));
+        for k in 0..=arc_steps_per_sector {
+            let t = a0 + (a1 - a0) * (k as f64 / arc_steps_per_sector as f64);
+            let p = center + Vec2::new(t.cos(), t.sin()) * radius;
+            pts.push(to_screen(p));
+        }
+        painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+    }
 }
 
 #[derive(Debug, Clone)]
