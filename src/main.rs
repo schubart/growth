@@ -31,6 +31,12 @@ struct DgApp {
     sides: usize,
     view_mode: ViewMode,
     zoom_px_per_unit: f64,
+    jitter_enabled: bool,
+    jitter_strength: f64,
+    auto_step: bool,
+    steps_per_frame: usize,
+    generation: u64,
+    rng: SimpleRng,
     polygon: Polygon,
 }
 
@@ -41,6 +47,12 @@ impl Default for DgApp {
             sides: 32,
             view_mode: ViewMode::Fit,
             zoom_px_per_unit: 120.0,
+            jitter_enabled: true,
+            jitter_strength: 0.005,
+            auto_step: false,
+            steps_per_frame: 1,
+            generation: 0,
+            rng: SimpleRng::new(0xD1FF_EA11_2026_0001),
             polygon: Polygon::new(),
         };
         app.rebuild_polygon();
@@ -51,6 +63,18 @@ impl Default for DgApp {
 impl DgApp {
     fn rebuild_polygon(&mut self) {
         self.polygon = Polygon::regular_ngon(self.radius, self.sides);
+        self.generation = 0;
+    }
+
+    fn step_sim(&mut self) {
+        if self.jitter_enabled && self.jitter_strength > 0.0 {
+            for v in self.polygon.vertices_mut() {
+                let jx = self.rng.next_signed_unit() * self.jitter_strength;
+                let jy = self.rng.next_signed_unit() * self.jitter_strength;
+                *v += Vec2::new(jx, jy);
+            }
+        }
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn draw_polygon(ui: &mut egui::Ui, rect: Rect, polygon: &Polygon, view_mode: ViewMode, fixed_zoom: f64) {
@@ -128,11 +152,32 @@ impl eframe::App for DgApp {
                     );
                 }
 
+                ui.separator();
+                ui.heading("Simulation");
+                ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
+                ui.add(
+                    egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
+                        .text("Jitter Strength"),
+                );
+                ui.add(egui::Slider::new(&mut self.steps_per_frame, 1..=32).text("Steps/Frame"));
+
+                ui.horizontal(|ui| {
+                    if ui.button("Step").clicked() {
+                        self.step_sim();
+                    }
+                    ui.checkbox(&mut self.auto_step, "Run");
+                });
+
                 if ui.button("Reset").clicked() {
                     self.radius = 1.0;
                     self.sides = 32;
                     self.view_mode = ViewMode::Fit;
                     self.zoom_px_per_unit = 120.0;
+                    self.jitter_enabled = true;
+                    self.jitter_strength = 0.005;
+                    self.auto_step = false;
+                    self.steps_per_frame = 1;
+                    self.rng = SimpleRng::new(0xD1FF_EA11_2026_0001);
                     changed = true;
                 }
 
@@ -143,10 +188,18 @@ impl eframe::App for DgApp {
                 ui.separator();
                 ui.label(format!("Vertices: {}", self.polygon.len()));
                 ui.label(format!("Perimeter: {:.6}", self.polygon.perimeter()));
+                ui.label(format!("Generation: {}", self.generation));
                 if let Some(c) = self.polygon.centroid() {
                     ui.label(format!("Centroid: ({:.4}, {:.4})", c.x, c.y));
                 }
             });
+
+        if self.auto_step {
+            for _ in 0..self.steps_per_frame {
+                self.step_sim();
+            }
+            ctx.request_repaint();
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_size();
@@ -172,4 +225,34 @@ fn bounds(points: &[Vec2]) -> Option<(Vec2, Vec2)> {
     }
 
     Some((min, max))
+}
+
+#[derive(Debug, Clone)]
+struct SimpleRng {
+    state: u64,
+}
+
+impl SimpleRng {
+    fn new(seed: u64) -> Self {
+        let state = if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed };
+        Self { state }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.state = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    fn next_unit(&mut self) -> f64 {
+        const SCALE: f64 = (1u64 << 53) as f64;
+        ((self.next_u64() >> 11) as f64) / SCALE
+    }
+
+    fn next_signed_unit(&mut self) -> f64 {
+        self.next_unit() * 2.0 - 1.0
+    }
 }

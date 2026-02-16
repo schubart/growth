@@ -43,6 +43,10 @@ impl Polygon {
         &self.vertices
     }
 
+    pub fn vertices_mut(&mut self) -> &mut [Vec2] {
+        &mut self.vertices
+    }
+
     pub fn square(half_extent: Real) -> Self {
         Self::from_tuples([
             (-half_extent, -half_extent),
