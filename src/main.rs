@@ -2,6 +2,7 @@ use dg4::geometry::{Polygon, Vec2};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke};
 use std::f64::consts::PI;
 
+// Launch a native egui desktop window.
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
@@ -13,7 +14,9 @@ fn main() -> Result<(), eframe::Error> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViewMode {
+    // Auto-fit polygon bounds into the viewport.
     Fit,
+    // Use fixed pixels-per-unit so radius changes are visible.
     FixedZoom,
 }
 
@@ -28,20 +31,27 @@ impl ViewMode {
 
 #[derive(Debug)]
 struct DgApp {
+    // Starter shape controls.
     radius: f64,
     sides: usize,
+    // Camera / view controls.
     view_mode: ViewMode,
     zoom_px_per_unit: f64,
+    // Edge spring force controls.
     edge_regularization_enabled: bool,
     target_edge_length: f64,
     edge_stiffness: f64,
+    // Non-neighbor short-range repulsion controls.
     repulsion_enabled: bool,
     repulsion_radius: f64,
     repulsion_strength: f64,
+    // Brownian jitter controls.
     jitter_enabled: bool,
     jitter_strength: f64,
+    // Simulation stepping controls.
     auto_step: bool,
     steps_per_frame: usize,
+    // Simulation state.
     generation: u64,
     rng: SimpleRng,
     polygon: Polygon,
@@ -74,23 +84,27 @@ impl Default for DgApp {
 }
 
 impl DgApp {
+    // Rebuild starter geometry from current shape parameters.
     fn rebuild_polygon(&mut self) {
         self.polygon = Polygon::regular_ngon(self.radius, self.sides);
         self.target_edge_length = regular_ngon_edge_length(self.radius, self.sides);
         self.generation = 0;
     }
 
+    // One overdamped simulation step: accumulate displacements, then apply.
     fn step_sim(&mut self) {
         let n = self.polygon.len();
         if n == 0 {
             return;
         }
 
+        // Snapshot positions so all forces are computed from the same state.
         let positions = self.polygon.vertices().to_vec();
         let mut delta = vec![Vec2::ZERO; n];
 
         if self.edge_regularization_enabled && self.edge_stiffness > 0.0 && self.target_edge_length > 0.0
         {
+            // Edge springs keep local spacing near target length.
             for i in 0..n {
                 let j = (i + 1) % n;
                 let d = positions[j] - positions[i];
@@ -98,6 +112,7 @@ impl DgApp {
                 if len > 1e-12 {
                     let dir = d / len;
                     let error = len - self.target_edge_length;
+                    // Apply equal/opposite correction to edge endpoints.
                     let correction = dir * (error * self.edge_stiffness * 0.5);
                     delta[i] += correction;
                     delta[j] -= correction;
@@ -107,6 +122,7 @@ impl DgApp {
 
         if self.repulsion_enabled && self.repulsion_strength > 0.0 && self.repulsion_radius > 0.0 {
             let radius_sq = self.repulsion_radius * self.repulsion_radius;
+            // Pairwise repulsion excludes immediate polygon neighbors.
             for i in 0..n {
                 for j in (i + 1)..n {
                     if are_neighbors(i, j, n) {
@@ -121,6 +137,7 @@ impl DgApp {
 
                     let dist = dist_sq.sqrt();
                     let dir = d / dist;
+                    // Repulsion fades linearly to zero at the radius boundary.
                     let proximity = 1.0 - dist / self.repulsion_radius;
                     let mag = self.repulsion_strength * proximity;
                     let push = dir * (mag * 0.5);
@@ -132,6 +149,7 @@ impl DgApp {
         }
 
         if self.jitter_enabled && self.jitter_strength > 0.0 {
+            // Brownian term adds small random perturbation per vertex.
             for d in &mut delta {
                 let jx = self.rng.next_signed_unit() * self.jitter_strength;
                 let jy = self.rng.next_signed_unit() * self.jitter_strength;
@@ -139,6 +157,7 @@ impl DgApp {
             }
         }
 
+        // Apply total displacement field to the polygon.
         for (v, d) in self.polygon.vertices_mut().iter_mut().zip(delta) {
             *v += d;
         }
@@ -146,6 +165,7 @@ impl DgApp {
         self.generation = self.generation.saturating_add(1);
     }
 
+    // Draw polygon in viewport with either fit or fixed zoom mapping.
     fn draw_polygon(ui: &mut egui::Ui, rect: Rect, polygon: &Polygon, view_mode: ViewMode, fixed_zoom: f64) {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, Color32::from_gray(20));
@@ -161,6 +181,7 @@ impl DgApp {
 
         let scale = match view_mode {
             ViewMode::Fit => {
+                // Preserve aspect ratio while fitting bounds with a small margin.
                 let scale_x = rect.width() as f64 / width;
                 let scale_y = rect.height() as f64 / height;
                 scale_x.min(scale_y) * 0.9
@@ -168,6 +189,7 @@ impl DgApp {
             ViewMode::FixedZoom => fixed_zoom.max(1.0),
         };
 
+        // World-to-screen transform centered on polygon bounds.
         let to_screen = |p: Vec2| -> Pos2 {
             let local = (p - center) * scale;
             Pos2::new(
@@ -190,6 +212,7 @@ impl DgApp {
 
 impl eframe::App for DgApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Left panel exposes all simulation controls and metrics.
         egui::SidePanel::left("controls")
             .resizable(false)
             .default_width(250.0)
@@ -233,6 +256,7 @@ impl eframe::App for DgApp {
                     egui::Slider::new(&mut self.edge_stiffness, 0.0..=1.0).text("Edge Stiffness"),
                 );
                 if ui.button("Set Target From Current Shape").clicked() {
+                    // Re-anchor target edge length to current geometry.
                     self.target_edge_length = average_edge_length(&self.polygon);
                 }
 
@@ -264,6 +288,7 @@ impl eframe::App for DgApp {
                 });
 
                 if ui.button("Reset").clicked() {
+                    // Reset controls and RNG seed to deterministic defaults.
                     self.radius = 1.0;
                     self.sides = 32;
                     self.view_mode = ViewMode::Fit;
@@ -299,6 +324,7 @@ impl eframe::App for DgApp {
             });
 
         if self.auto_step {
+            // Advance multiple steps per frame for faster evolution.
             for _ in 0..self.steps_per_frame {
                 self.step_sim();
             }
@@ -318,6 +344,7 @@ fn bounds(points: &[Vec2]) -> Option<(Vec2, Vec2)> {
         return None;
     }
 
+    // Axis-aligned bounding box over all vertices.
     let mut min = points[0];
     let mut max = points[0];
 
@@ -335,6 +362,7 @@ fn regular_ngon_edge_length(radius: f64, sides: usize) -> f64 {
     if radius <= 0.0 || sides < 3 {
         return 0.0;
     }
+    // Chord length of an inscribed regular n-gon.
     2.0 * radius * (PI / sides as f64).sin()
 }
 
@@ -343,6 +371,7 @@ fn average_edge_length(polygon: &Polygon) -> f64 {
     if n < 2 {
         return 0.0;
     }
+    // Mean edge length for a closed polygon.
     polygon.perimeter() / n as f64
 }
 
@@ -350,6 +379,7 @@ fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
     if n < 2 || i == j {
         return true;
     }
+    // Adjacent indices are connected by an edge in the closed loop.
     let next_i = (i + 1) % n;
     let prev_i = (i + n - 1) % n;
     j == next_i || j == prev_i
@@ -357,6 +387,7 @@ fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
 
 #[derive(Debug, Clone)]
 struct SimpleRng {
+    // Small deterministic RNG state for reproducible jitter.
     state: u64,
 }
 
@@ -367,6 +398,7 @@ impl SimpleRng {
     }
 
     fn next_u64(&mut self) -> u64 {
+        // xorshift64* core step.
         let mut x = self.state;
         x ^= x >> 12;
         x ^= x << 25;
@@ -376,11 +408,13 @@ impl SimpleRng {
     }
 
     fn next_unit(&mut self) -> f64 {
+        // Map high-quality bits to [0, 1).
         const SCALE: f64 = (1u64 << 53) as f64;
         ((self.next_u64() >> 11) as f64) / SCALE
     }
 
     fn next_signed_unit(&mut self) -> f64 {
+        // Convenience range for symmetric jitter.
         self.next_unit() * 2.0 - 1.0
     }
 }

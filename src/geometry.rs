@@ -4,6 +4,7 @@ use std::f64::consts::TAU;
 pub type Real = f64;
 pub type Vec2 = DVec2;
 
+// Closed polygon represented as ordered vertices.
 #[derive(Debug, Clone, Default)]
 pub struct Polygon {
     vertices: Vec<Vec2>,
@@ -19,6 +20,7 @@ impl Polygon {
     }
 
     pub fn from_tuples(points: impl IntoIterator<Item = (Real, Real)>) -> Self {
+        // Convert plain tuples into vector math coordinates.
         let vertices = points.into_iter().map(|(x, y)| Vec2::new(x, y)).collect();
         Self { vertices }
     }
@@ -48,6 +50,7 @@ impl Polygon {
     }
 
     pub fn square(half_extent: Real) -> Self {
+        // Axis-aligned square centered at the origin.
         Self::from_tuples([
             (-half_extent, -half_extent),
             (half_extent, -half_extent),
@@ -61,6 +64,7 @@ impl Polygon {
             return Self::new();
         }
 
+        // Evenly distribute vertices on a circle.
         let mut vertices = Vec::with_capacity(sides);
         for i in 0..sides {
             let t = TAU * (i as Real) / (sides as Real);
@@ -75,6 +79,7 @@ impl Polygon {
             return 0.0;
         }
 
+        // Sum edge lengths, including the closing edge.
         let mut total = 0.0;
         for i in 0..n {
             let a = self.vertices[i];
@@ -88,6 +93,7 @@ impl Polygon {
         if self.vertices.is_empty() {
             return None;
         }
+        // Simple vertex-average centroid for current polyline model.
         let sum = self
             .vertices
             .iter()
