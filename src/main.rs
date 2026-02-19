@@ -1,8 +1,6 @@
 use dg4::geometry::{Polygon, Vec2};
+use dg4::sim::{average_edge_length, regular_ngon_edge_length, SimParams, Simulation};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use std::f64::consts::PI;
 
 // Launch a native egui desktop window.
 fn main() -> Result<(), eframe::Error> {
@@ -54,9 +52,7 @@ struct DgApp {
     auto_step: bool,
     steps_per_frame: usize,
     // Simulation state.
-    generation: u64,
-    rng: StdRng,
-    polygon: Polygon,
+    sim: Simulation,
 }
 
 impl Default for DgApp {
@@ -76,9 +72,7 @@ impl Default for DgApp {
             jitter_strength: 0.005,
             auto_step: false,
             steps_per_frame: 1,
-            generation: 0,
-            rng: StdRng::seed_from_u64(0xD1FF_EA11_2026_0001),
-            polygon: Polygon::new(),
+            sim: Simulation::new(0xD1FF_EA11_2026_0001),
         };
         app.rebuild_polygon();
         app
@@ -88,83 +82,21 @@ impl Default for DgApp {
 impl DgApp {
     // Rebuild starter geometry from current shape parameters.
     fn rebuild_polygon(&mut self) {
-        self.polygon = Polygon::regular_ngon(self.radius, self.sides);
+        self.sim.rebuild_polygon(self.radius, self.sides);
         self.target_edge_length = regular_ngon_edge_length(self.radius, self.sides);
-        self.generation = 0;
     }
 
-    // One overdamped simulation step: accumulate displacements, then apply.
-    fn step_sim(&mut self) {
-        let n = self.polygon.len();
-        if n == 0 {
-            return;
+    fn sim_params(&self) -> SimParams {
+        SimParams {
+            edge_regularization_enabled: self.edge_regularization_enabled,
+            target_edge_length: self.target_edge_length,
+            edge_stiffness: self.edge_stiffness,
+            repulsion_enabled: self.repulsion_enabled,
+            repulsion_radius: self.repulsion_radius,
+            repulsion_strength: self.repulsion_strength,
+            jitter_enabled: self.jitter_enabled,
+            jitter_strength: self.jitter_strength,
         }
-
-        // Snapshot positions so all forces are computed from the same state.
-        let positions = self.polygon.vertices().to_vec();
-        let mut delta = vec![Vec2::ZERO; n];
-
-        if self.edge_regularization_enabled && self.edge_stiffness > 0.0 && self.target_edge_length > 0.0
-        {
-            // Edge springs keep local spacing near target length.
-            for i in 0..n {
-                let j = (i + 1) % n;
-                let d = positions[j] - positions[i];
-                let len = d.length();
-                if len > 1e-12 {
-                    let dir = d / len;
-                    let error = len - self.target_edge_length;
-                    // Apply equal/opposite correction to edge endpoints.
-                    let correction = dir * (error * self.edge_stiffness * 0.5);
-                    delta[i] += correction;
-                    delta[j] -= correction;
-                }
-            }
-        }
-
-        if self.repulsion_enabled && self.repulsion_strength > 0.0 && self.repulsion_radius > 0.0 {
-            let radius_sq = self.repulsion_radius * self.repulsion_radius;
-            // Pairwise repulsion excludes immediate polygon neighbors.
-            for i in 0..n {
-                for j in (i + 1)..n {
-                    if are_neighbors(i, j, n) {
-                        continue;
-                    }
-
-                    let d = positions[j] - positions[i];
-                    let dist_sq = d.length_squared();
-                    if dist_sq <= 1e-18 || dist_sq >= radius_sq {
-                        continue;
-                    }
-
-                    let dist = dist_sq.sqrt();
-                    let dir = d / dist;
-                    // Repulsion fades linearly to zero at the radius boundary.
-                    let proximity = 1.0 - dist / self.repulsion_radius;
-                    let mag = self.repulsion_strength * proximity;
-                    let push = dir * (mag * 0.5);
-
-                    delta[i] -= push;
-                    delta[j] += push;
-                }
-            }
-        }
-
-        if self.jitter_enabled && self.jitter_strength > 0.0 {
-            // Brownian term adds small random perturbation per vertex.
-            for d in &mut delta {
-                let jx = self.rng.gen_range(-1.0..1.0) * self.jitter_strength;
-                let jy = self.rng.gen_range(-1.0..1.0) * self.jitter_strength;
-                *d += Vec2::new(jx, jy);
-            }
-        }
-
-        // Apply total displacement field to the polygon.
-        for (v, d) in self.polygon.vertices_mut().iter_mut().zip(delta) {
-            *v += d;
-        }
-
-        self.generation = self.generation.saturating_add(1);
     }
 
     // Draw polygon in viewport with either fit or fixed zoom mapping.
@@ -259,7 +191,7 @@ impl eframe::App for DgApp {
                 );
                 if ui.button("Set Target From Current Shape").clicked() {
                     // Re-anchor target edge length to current geometry.
-                    self.target_edge_length = average_edge_length(&self.polygon);
+                    self.target_edge_length = average_edge_length(self.sim.polygon());
                 }
 
                 ui.separator();
@@ -284,7 +216,7 @@ impl eframe::App for DgApp {
 
                 ui.horizontal(|ui| {
                     if ui.button("Step").clicked() {
-                        self.step_sim();
+                        self.sim.step(self.sim_params());
                     }
                     ui.checkbox(&mut self.auto_step, "Run");
                 });
@@ -304,7 +236,7 @@ impl eframe::App for DgApp {
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
                     self.steps_per_frame = 1;
-                    self.rng = StdRng::seed_from_u64(0xD1FF_EA11_2026_0001);
+                    self.sim.reset_seed(0xD1FF_EA11_2026_0001);
                     changed = true;
                 }
 
@@ -313,14 +245,14 @@ impl eframe::App for DgApp {
                 }
 
                 ui.separator();
-                ui.label(format!("Vertices: {}", self.polygon.len()));
-                ui.label(format!("Perimeter: {:.6}", self.polygon.perimeter()));
+                ui.label(format!("Vertices: {}", self.sim.polygon().len()));
+                ui.label(format!("Perimeter: {:.6}", self.sim.polygon().perimeter()));
                 ui.label(format!(
                     "Avg Edge Length: {:.6}",
-                    average_edge_length(&self.polygon)
+                    average_edge_length(self.sim.polygon())
                 ));
-                ui.label(format!("Generation: {}", self.generation));
-                if let Some(c) = self.polygon.centroid() {
+                ui.label(format!("Generation: {}", self.sim.generation()));
+                if let Some(c) = self.sim.polygon().centroid() {
                     ui.label(format!("Centroid: ({:.4}, {:.4})", c.x, c.y));
                 }
             });
@@ -328,7 +260,7 @@ impl eframe::App for DgApp {
         if self.auto_step {
             // Advance multiple steps per frame for faster evolution.
             for _ in 0..self.steps_per_frame {
-                self.step_sim();
+                self.sim.step(self.sim_params());
             }
             ctx.request_repaint();
         }
@@ -336,7 +268,13 @@ impl eframe::App for DgApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_size();
             let (response, _painter) = ui.allocate_painter(available, Sense::hover());
-            Self::draw_polygon(ui, response.rect, &self.polygon, self.view_mode, self.zoom_px_per_unit);
+            Self::draw_polygon(
+                ui,
+                response.rect,
+                self.sim.polygon(),
+                self.view_mode,
+                self.zoom_px_per_unit,
+            );
         });
     }
 }
@@ -358,31 +296,4 @@ fn bounds(points: &[Vec2]) -> Option<(Vec2, Vec2)> {
     }
 
     Some((min, max))
-}
-
-fn regular_ngon_edge_length(radius: f64, sides: usize) -> f64 {
-    if radius <= 0.0 || sides < 3 {
-        return 0.0;
-    }
-    // Chord length of an inscribed regular n-gon.
-    2.0 * radius * (PI / sides as f64).sin()
-}
-
-fn average_edge_length(polygon: &Polygon) -> f64 {
-    let n = polygon.len();
-    if n < 2 {
-        return 0.0;
-    }
-    // Mean edge length for a closed polygon.
-    polygon.perimeter() / n as f64
-}
-
-fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
-    if n < 2 || i == j {
-        return true;
-    }
-    // Adjacent indices are connected by an edge in the closed loop.
-    let next_i = (i + 1) % n;
-    let prev_i = (i + n - 1) % n;
-    j == next_i || j == prev_i
 }
