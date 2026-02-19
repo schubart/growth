@@ -15,8 +15,19 @@ pub struct SimParams {
     pub growth_rate: f64,
     pub split_enabled: bool,
     pub split_length: f64,
+    pub constraint_enabled: bool,
+    pub constraint_shape: ConstraintShape,
+    pub constraint_size: f64,
+    pub constraint_strength: f64,
     pub jitter_enabled: bool,
     pub jitter_strength: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintShape {
+    Circle,
+    Square,
+    Triangle,
 }
 
 #[derive(Debug)]
@@ -128,6 +139,13 @@ impl Simulation {
             }
         }
 
+        if params.constraint_enabled && params.constraint_strength > 0.0 && params.constraint_size > 0.0 {
+            for (i, p) in positions.iter().copied().enumerate() {
+                let push = constraint_push(p, params.constraint_shape, params.constraint_size);
+                delta[i] += push * params.constraint_strength;
+            }
+        }
+
         if params.jitter_enabled && params.jitter_strength > 0.0 {
             // Brownian term adds small random perturbation per vertex.
             for d in &mut delta {
@@ -196,6 +214,63 @@ fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
     let next_i = (i + 1) % n;
     let prev_i = (i + n - 1) % n;
     j == next_i || j == prev_i
+}
+
+fn constraint_push(p: Vec2, shape: ConstraintShape, size: f64) -> Vec2 {
+    match shape {
+        ConstraintShape::Circle => {
+            let r = p.length();
+            if r <= size || r <= 1e-12 {
+                Vec2::ZERO
+            } else {
+                let dir = p / r;
+                dir * (size - r)
+            }
+        }
+        ConstraintShape::Square => {
+            let clamped = Vec2::new(p.x.clamp(-size, size), p.y.clamp(-size, size));
+            if clamped == p {
+                Vec2::ZERO
+            } else {
+                clamped - p
+            }
+        }
+        ConstraintShape::Triangle => {
+            let verts = triangle_vertices(size);
+            let mut max_dist = 0.0;
+            let mut max_normal = Vec2::ZERO;
+
+            for i in 0..3 {
+                let a = verts[i];
+                let b = verts[(i + 1) % 3];
+                let edge = b - a;
+                let len = edge.length();
+                if len <= 1e-12 {
+                    continue;
+                }
+                // Outward normal for CCW triangle.
+                let normal = Vec2::new(edge.y, -edge.x) / len;
+                let dist = (p - a).dot(normal);
+                if dist > max_dist {
+                    max_dist = dist;
+                    max_normal = normal;
+                }
+            }
+
+            if max_dist > 0.0 {
+                -max_normal * max_dist
+            } else {
+                Vec2::ZERO
+            }
+        }
+    }
+}
+
+fn triangle_vertices(size: f64) -> [Vec2; 3] {
+    let a = Vec2::new(0.0, size);
+    let b = Vec2::new(-0.866_025_403_784, -0.5) * size;
+    let c = Vec2::new(0.866_025_403_784, -0.5) * size;
+    [a, b, c]
 }
 
 fn signed_area(points: &[Vec2]) -> f64 {

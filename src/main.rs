@@ -1,6 +1,8 @@
 use dg4::geometry::{Polygon, Vec2};
-use dg4::sim::{average_edge_length, regular_ngon_edge_length, SimParams, Simulation};
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke};
+use dg4::sim::{
+    average_edge_length, regular_ngon_edge_length, ConstraintShape, SimParams, Simulation,
+};
+use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind};
 
 // Launch a native egui desktop window.
 fn main() -> Result<(), eframe::Error> {
@@ -51,6 +53,12 @@ struct DgApp {
     // Edge splitting controls.
     split_enabled: bool,
     split_length: f64,
+    // Constraint region controls.
+    constraint_enabled: bool,
+    constraint_shape: ConstraintShape,
+    constraint_size: f64,
+    constraint_strength: f64,
+    constraint_show: bool,
     // Brownian jitter controls.
     jitter_enabled: bool,
     jitter_strength: f64,
@@ -78,6 +86,11 @@ impl Default for DgApp {
             growth_rate: 0.001,
             split_enabled: false,
             split_length: 0.25,
+            constraint_enabled: false,
+            constraint_shape: ConstraintShape::Circle,
+            constraint_size: 1.5,
+            constraint_strength: 0.1,
+            constraint_show: true,
             jitter_enabled: true,
             jitter_strength: 0.005,
             auto_step: true,
@@ -108,13 +121,26 @@ impl DgApp {
             growth_rate: self.growth_rate,
             split_enabled: self.split_enabled,
             split_length: self.split_length,
+            constraint_enabled: self.constraint_enabled,
+            constraint_shape: self.constraint_shape,
+            constraint_size: self.constraint_size,
+            constraint_strength: self.constraint_strength,
             jitter_enabled: self.jitter_enabled,
             jitter_strength: self.jitter_strength,
         }
     }
 
     // Draw polygon in viewport with either fit or fixed zoom mapping.
-    fn draw_polygon(ui: &mut egui::Ui, rect: Rect, polygon: &Polygon, view_mode: ViewMode, fixed_zoom: f64) {
+    fn draw_polygon(
+        ui: &mut egui::Ui,
+        rect: Rect,
+        polygon: &Polygon,
+        view_mode: ViewMode,
+        fixed_zoom: f64,
+        constraint_show: bool,
+        constraint_shape: ConstraintShape,
+        constraint_size: f64,
+    ) {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, Color32::from_gray(20));
 
@@ -145,6 +171,37 @@ impl DgApp {
                 rect.center().y - local.y as f32,
             )
         };
+
+        if constraint_show && constraint_size > 0.0 {
+            let fill = Color32::from_rgba_premultiplied(90, 120, 140, 28);
+            let stroke = Stroke::new(1.0, Color32::from_rgba_premultiplied(120, 160, 180, 80));
+
+            match constraint_shape {
+                ConstraintShape::Circle => {
+                    let radius = (constraint_size * scale) as f32;
+                    painter.circle_filled(rect.center(), radius, fill);
+                    painter.circle_stroke(rect.center(), radius, stroke);
+                }
+                ConstraintShape::Square => {
+                    let half = (constraint_size * scale) as f32;
+                    let square = Rect::from_min_max(
+                        Pos2::new(rect.center().x - half, rect.center().y - half),
+                        Pos2::new(rect.center().x + half, rect.center().y + half),
+                    );
+                    painter.rect_filled(square, 0.0, fill);
+                    painter.rect_stroke(square, 0.0, stroke, StrokeKind::Inside);
+                }
+                ConstraintShape::Triangle => {
+                    let vertices = [
+                        Vec2::new(0.0, constraint_size),
+                        Vec2::new(-0.866_025_403_784, -0.5) * constraint_size,
+                        Vec2::new(0.866_025_403_784, -0.5) * constraint_size,
+                    ];
+                    let points: Vec<Pos2> = vertices.iter().copied().map(to_screen).collect();
+                    painter.add(Shape::convex_polygon(points.clone(), fill, stroke));
+                }
+            }
+        }
 
         let mut points: Vec<Pos2> = polygon.vertices().iter().copied().map(to_screen).collect();
         if points.len() > 1 {
@@ -236,6 +293,30 @@ impl eframe::App for DgApp {
                 );
 
                 ui.separator();
+                ui.checkbox(&mut self.constraint_enabled, "Constrain To Area");
+                egui::ComboBox::from_label("Area Shape")
+                    .selected_text(match self.constraint_shape {
+                        ConstraintShape::Circle => "Circle",
+                        ConstraintShape::Square => "Square",
+                        ConstraintShape::Triangle => "Triangle",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Circle, "Circle");
+                        ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Square, "Square");
+                        ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Triangle, "Triangle");
+                    });
+                ui.add(
+                    egui::Slider::new(&mut self.constraint_size, 0.1..=5.0)
+                        .logarithmic(true)
+                        .text("Area Size"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.constraint_strength, 0.0..=1.0)
+                        .text("Constraint Strength"),
+                );
+                ui.checkbox(&mut self.constraint_show, "Show Area Overlay");
+
+                ui.separator();
                 ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
                 ui.add(
                     egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
@@ -265,6 +346,11 @@ impl eframe::App for DgApp {
                     self.growth_rate = 0.001;
                     self.split_enabled = false;
                     self.split_length = 0.25;
+                    self.constraint_enabled = false;
+                    self.constraint_shape = ConstraintShape::Circle;
+                    self.constraint_size = 1.5;
+                    self.constraint_strength = 0.1;
+                    self.constraint_show = true;
                     self.jitter_enabled = true;
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
@@ -307,6 +393,9 @@ impl eframe::App for DgApp {
                 self.sim.polygon(),
                 self.view_mode,
                 self.zoom_px_per_unit,
+                self.constraint_show,
+                self.constraint_shape,
+                self.constraint_size,
             );
         });
     }
