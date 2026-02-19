@@ -1,5 +1,7 @@
 use dg4::geometry::{Polygon, Vec2};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::f64::consts::PI;
 
 // Launch a native egui desktop window.
@@ -53,7 +55,7 @@ struct DgApp {
     steps_per_frame: usize,
     // Simulation state.
     generation: u64,
-    rng: SimpleRng,
+    rng: StdRng,
     polygon: Polygon,
 }
 
@@ -75,7 +77,7 @@ impl Default for DgApp {
             auto_step: false,
             steps_per_frame: 1,
             generation: 0,
-            rng: SimpleRng::new(0xD1FF_EA11_2026_0001),
+            rng: StdRng::seed_from_u64(0xD1FF_EA11_2026_0001),
             polygon: Polygon::new(),
         };
         app.rebuild_polygon();
@@ -151,8 +153,8 @@ impl DgApp {
         if self.jitter_enabled && self.jitter_strength > 0.0 {
             // Brownian term adds small random perturbation per vertex.
             for d in &mut delta {
-                let jx = self.rng.next_signed_unit() * self.jitter_strength;
-                let jy = self.rng.next_signed_unit() * self.jitter_strength;
+                let jx = self.rng.gen_range(-1.0..1.0) * self.jitter_strength;
+                let jy = self.rng.gen_range(-1.0..1.0) * self.jitter_strength;
                 *d += Vec2::new(jx, jy);
             }
         }
@@ -302,7 +304,7 @@ impl eframe::App for DgApp {
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
                     self.steps_per_frame = 1;
-                    self.rng = SimpleRng::new(0xD1FF_EA11_2026_0001);
+                    self.rng = StdRng::seed_from_u64(0xD1FF_EA11_2026_0001);
                     changed = true;
                 }
 
@@ -383,38 +385,4 @@ fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
     let next_i = (i + 1) % n;
     let prev_i = (i + n - 1) % n;
     j == next_i || j == prev_i
-}
-
-#[derive(Debug, Clone)]
-struct SimpleRng {
-    // Small deterministic RNG state for reproducible jitter.
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        let state = if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed };
-        Self { state }
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        // xorshift64* core step.
-        let mut x = self.state;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.state = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-
-    fn next_unit(&mut self) -> f64 {
-        // Map high-quality bits to [0, 1).
-        const SCALE: f64 = (1u64 << 53) as f64;
-        ((self.next_u64() >> 11) as f64) / SCALE
-    }
-
-    fn next_signed_unit(&mut self) -> f64 {
-        // Convenience range for symmetric jitter.
-        self.next_unit() * 2.0 - 1.0
-    }
 }

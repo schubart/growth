@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 eframe = { version = "0.33", default-features = true }
 glam = "0.30"
+rand = "0.8"
