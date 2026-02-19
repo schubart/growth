@@ -70,7 +70,7 @@ impl Default for DgApp {
             repulsion_strength: 0.01,
             jitter_enabled: true,
             jitter_strength: 0.005,
-            auto_step: false,
+            auto_step: true,
             steps_per_frame: 1,
             sim: Simulation::new(0xD1FF_EA11_2026_0001),
         };
