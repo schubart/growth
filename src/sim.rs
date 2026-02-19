@@ -13,6 +13,8 @@ pub struct SimParams {
     pub repulsion_strength: f64,
     pub growth_enabled: bool,
     pub growth_rate: f64,
+    pub split_enabled: bool,
+    pub split_length: f64,
     pub jitter_enabled: bool,
     pub jitter_strength: f64,
 }
@@ -138,6 +140,31 @@ impl Simulation {
         // Apply total displacement field to the polygon.
         for (v, d) in self.polygon.vertices_mut().iter_mut().zip(delta) {
             *v += d;
+        }
+
+        if params.split_enabled && params.split_length > 0.0 {
+            let positions = self.polygon.vertices();
+            if positions.len() >= 2 {
+                let mut next_vertices = Vec::with_capacity(positions.len());
+                for i in 0..positions.len() {
+                    let a = positions[i];
+                    let b = positions[(i + 1) % positions.len()];
+                    next_vertices.push(a);
+
+                    let len = a.distance(b);
+                    if len > params.split_length {
+                        let segments = (len / params.split_length).ceil() as usize;
+                        if segments > 1 {
+                            let denom = segments as f64;
+                            for k in 1..segments {
+                                let t = (k as f64) / denom;
+                                next_vertices.push(a.lerp(b, t));
+                            }
+                        }
+                    }
+                }
+                self.polygon.replace_vertices(next_vertices);
+            }
         }
 
         self.generation = self.generation.saturating_add(1);

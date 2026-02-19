@@ -15,6 +15,10 @@ impl Polygon {
         Self::default()
     }
 
+    pub(crate) fn replace_vertices(&mut self, vertices: Vec<Vec2>) {
+        self.vertices = vertices;
+    }
+
     pub fn len(&self) -> usize {
         self.vertices.len()
     }

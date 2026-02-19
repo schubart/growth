@@ -48,6 +48,9 @@ struct DgApp {
     // Normal growth controls.
     growth_enabled: bool,
     growth_rate: f64,
+    // Edge splitting controls.
+    split_enabled: bool,
+    split_length: f64,
     // Brownian jitter controls.
     jitter_enabled: bool,
     jitter_strength: f64,
@@ -73,6 +76,8 @@ impl Default for DgApp {
             repulsion_strength: 0.01,
             growth_enabled: false,
             growth_rate: 0.001,
+            split_enabled: false,
+            split_length: 0.25,
             jitter_enabled: true,
             jitter_strength: 0.005,
             auto_step: true,
@@ -101,6 +106,8 @@ impl DgApp {
             repulsion_strength: self.repulsion_strength,
             growth_enabled: self.growth_enabled,
             growth_rate: self.growth_rate,
+            split_enabled: self.split_enabled,
+            split_length: self.split_length,
             jitter_enabled: self.jitter_enabled,
             jitter_strength: self.jitter_strength,
         }
@@ -221,6 +228,14 @@ impl eframe::App for DgApp {
                 );
 
                 ui.separator();
+                ui.checkbox(&mut self.split_enabled, "Split Long Edges");
+                ui.add(
+                    egui::Slider::new(&mut self.split_length, 0.005..=1.0)
+                        .logarithmic(true)
+                        .text("Split Length"),
+                );
+
+                ui.separator();
                 ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
                 ui.add(
                     egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
@@ -248,6 +263,8 @@ impl eframe::App for DgApp {
                     self.repulsion_strength = 0.01;
                     self.growth_enabled = false;
                     self.growth_rate = 0.001;
+                    self.split_enabled = false;
+                    self.split_length = 0.25;
                     self.jitter_enabled = true;
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
