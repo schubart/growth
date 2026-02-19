@@ -11,6 +11,8 @@ pub struct SimParams {
     pub repulsion_enabled: bool,
     pub repulsion_radius: f64,
     pub repulsion_strength: f64,
+    pub growth_enabled: bool,
+    pub growth_rate: f64,
     pub jitter_enabled: bool,
     pub jitter_strength: f64,
 }
@@ -106,6 +108,24 @@ impl Simulation {
             }
         }
 
+        if params.growth_enabled && params.growth_rate != 0.0 {
+            let area = signed_area(&positions);
+            let outward_sign = if area >= 0.0 { -1.0 } else { 1.0 };
+
+            for i in 0..n {
+                let prev = positions[(i + n - 1) % n];
+                let next = positions[(i + 1) % n];
+                let tangent = next - prev;
+                let len = tangent.length();
+                if len <= 1e-12 {
+                    continue;
+                }
+                let dir = tangent / len;
+                let normal = Vec2::new(dir.y, -dir.x) * outward_sign;
+                delta[i] += normal * params.growth_rate;
+            }
+        }
+
         if params.jitter_enabled && params.jitter_strength > 0.0 {
             // Brownian term adds small random perturbation per vertex.
             for d in &mut delta {
@@ -149,4 +169,19 @@ fn are_neighbors(i: usize, j: usize, n: usize) -> bool {
     let next_i = (i + 1) % n;
     let prev_i = (i + n - 1) % n;
     j == next_i || j == prev_i
+}
+
+fn signed_area(points: &[Vec2]) -> f64 {
+    let n = points.len();
+    if n < 3 {
+        return 0.0;
+    }
+
+    let mut sum = 0.0;
+    for i in 0..n {
+        let a = points[i];
+        let b = points[(i + 1) % n];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    0.5 * sum
 }

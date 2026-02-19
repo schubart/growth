@@ -45,6 +45,9 @@ struct DgApp {
     repulsion_enabled: bool,
     repulsion_radius: f64,
     repulsion_strength: f64,
+    // Normal growth controls.
+    growth_enabled: bool,
+    growth_rate: f64,
     // Brownian jitter controls.
     jitter_enabled: bool,
     jitter_strength: f64,
@@ -68,6 +71,8 @@ impl Default for DgApp {
             repulsion_enabled: true,
             repulsion_radius: 0.15,
             repulsion_strength: 0.01,
+            growth_enabled: false,
+            growth_rate: 0.001,
             jitter_enabled: true,
             jitter_strength: 0.005,
             auto_step: true,
@@ -94,6 +99,8 @@ impl DgApp {
             repulsion_enabled: self.repulsion_enabled,
             repulsion_radius: self.repulsion_radius,
             repulsion_strength: self.repulsion_strength,
+            growth_enabled: self.growth_enabled,
+            growth_rate: self.growth_rate,
             jitter_enabled: self.jitter_enabled,
             jitter_strength: self.jitter_strength,
         }
@@ -207,6 +214,13 @@ impl eframe::App for DgApp {
                 );
 
                 ui.separator();
+                ui.checkbox(&mut self.growth_enabled, "Normal Growth");
+                ui.add(
+                    egui::Slider::new(&mut self.growth_rate, -0.01..=0.01)
+                        .text("Growth Rate"),
+                );
+
+                ui.separator();
                 ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
                 ui.add(
                     egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
@@ -232,6 +246,8 @@ impl eframe::App for DgApp {
                     self.repulsion_enabled = true;
                     self.repulsion_radius = 0.15;
                     self.repulsion_strength = 0.01;
+                    self.growth_enabled = false;
+                    self.growth_rate = 0.001;
                     self.jitter_enabled = true;
                     self.jitter_strength = 0.005;
                     self.auto_step = false;
