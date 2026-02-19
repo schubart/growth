@@ -7,11 +7,23 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind};
 
 // Launch a native egui desktop window.
 fn main() -> Result<(), eframe::Error> {
-    let options = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 800.0])
+            .with_maximized(true),
+        ..Default::default()
+    };
     eframe::run_native(
         "Differential Growth Playground",
         options,
-        Box::new(|_cc| Ok(Box::new(DgApp::default()))),
+        Box::new(|cc| {
+            let mut style = (*cc.egui_ctx.style()).clone();
+            for font_id in style.text_styles.values_mut() {
+                font_id.size *= 0.9;
+            }
+            cc.egui_ctx.set_style(style);
+            Ok(Box::new(DgApp::default()))
+        }),
     )
 }
 
@@ -223,163 +235,197 @@ impl eframe::App for DgApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Left panel exposes all simulation controls and metrics.
         egui::SidePanel::left("controls")
-            .resizable(false)
-            .default_width(250.0)
+            .resizable(true)
+            .min_width(280.0)
+            .default_width(360.0)
             .show(ctx, |ui| {
-                ui.heading("Starter Polygon");
-                ui.separator();
-
                 let mut changed = false;
+                ui.columns(2, |columns| {
+                    let (left, right) = columns.split_at_mut(1);
+                    let left = &mut left[0];
+                    let right = &mut right[0];
 
-                changed |= ui
-                    .add(egui::Slider::new(&mut self.radius, 0.05..=10.0).text("Radius"))
-                    .changed();
+                    left.heading("Starter Polygon");
+                    left.separator();
+                    changed |= left
+                        .add(egui::Slider::new(&mut self.radius, 0.05..=10.0).text("Radius"))
+                        .changed();
+                    changed |= left
+                        .add(egui::Slider::new(&mut self.sides, 3..=512).text("Sides"))
+                        .changed();
 
-                changed |= ui
-                    .add(egui::Slider::new(&mut self.sides, 3..=512).text("Sides"))
-                    .changed();
-
-                egui::ComboBox::from_label("View")
-                    .selected_text(self.view_mode.label())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.view_mode, ViewMode::Fit, "Fit");
-                        ui.selectable_value(&mut self.view_mode, ViewMode::FixedZoom, "Fixed Zoom");
-                    });
-
-                if self.view_mode == ViewMode::FixedZoom {
-                    ui.add(
-                        egui::Slider::new(&mut self.zoom_px_per_unit, 10.0..=400.0)
-                            .text("Zoom (px/unit)"),
-                    );
-                }
-
-                ui.separator();
-                ui.heading("Simulation");
-                ui.checkbox(&mut self.edge_regularization_enabled, "Edge Regularization");
-                ui.add(
-                    egui::Slider::new(&mut self.target_edge_length, 0.0001..=2.0)
-                        .logarithmic(true)
-                        .text("Target Edge Length"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.edge_stiffness, 0.0..=1.0).text("Edge Stiffness"),
-                );
-                if ui.button("Set Target From Current Shape").clicked() {
-                    // Re-anchor target edge length to current geometry.
-                    self.target_edge_length = average_edge_length(self.sim.polygon());
-                }
-
-                ui.separator();
-                ui.checkbox(&mut self.repulsion_enabled, "Self Repulsion");
-                ui.add(
-                    egui::Slider::new(&mut self.repulsion_radius, 0.0001..=2.0)
-                        .logarithmic(true)
-                        .text("Repulsion Radius"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.repulsion_strength, 0.0..=0.1)
-                        .text("Repulsion Strength"),
-                );
-
-                ui.separator();
-                ui.checkbox(&mut self.growth_enabled, "Normal Growth");
-                ui.add(
-                    egui::Slider::new(&mut self.growth_rate, -0.01..=0.01)
-                        .text("Growth Rate"),
-                );
-
-                ui.separator();
-                ui.checkbox(&mut self.split_enabled, "Split Long Edges");
-                ui.add(
-                    egui::Slider::new(&mut self.split_length, 0.005..=1.0)
-                        .logarithmic(true)
-                        .text("Split Length"),
-                );
-
-                ui.separator();
-                ui.checkbox(&mut self.constraint_enabled, "Constrain To Area");
-                egui::ComboBox::from_label("Area Shape")
-                    .selected_text(match self.constraint_shape {
-                        ConstraintShape::Circle => "Circle",
-                        ConstraintShape::Square => "Square",
-                        ConstraintShape::Triangle => "Triangle",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Circle, "Circle");
-                        ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Square, "Square");
-                        ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Triangle, "Triangle");
-                    });
-                egui::ComboBox::from_label("Constraint Falloff")
-                    .selected_text(match self.constraint_falloff {
-                        ConstraintFalloff::Linear => "Linear",
-                        ConstraintFalloff::Quadratic => "Quadratic",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.constraint_falloff,
-                            ConstraintFalloff::Linear,
-                            "Linear",
+                    left.separator();
+                    left.heading("View");
+                    left.separator();
+                    egui::ComboBox::from_label("View")
+                        .selected_text(self.view_mode.label())
+                        .show_ui(left, |ui| {
+                            ui.selectable_value(&mut self.view_mode, ViewMode::Fit, "Fit");
+                            ui.selectable_value(&mut self.view_mode, ViewMode::FixedZoom, "Fixed Zoom");
+                        });
+                    if self.view_mode == ViewMode::FixedZoom {
+                        left.add(
+                            egui::Slider::new(&mut self.zoom_px_per_unit, 10.0..=400.0)
+                                .text("Zoom (px/unit)"),
                         );
-                        ui.selectable_value(
-                            &mut self.constraint_falloff,
-                            ConstraintFalloff::Quadratic,
-                            "Quadratic",
-                        );
-                    });
-                ui.add(
-                    egui::Slider::new(&mut self.constraint_size, 0.1..=5.0)
-                        .logarithmic(true)
-                        .text("Area Size"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.constraint_strength, 0.0..=1.0)
-                        .text("Constraint Strength"),
-                );
-                ui.checkbox(&mut self.constraint_show, "Show Area Overlay");
-
-                ui.separator();
-                ui.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
-                ui.add(
-                    egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
-                        .text("Jitter Strength"),
-                );
-                ui.add(egui::Slider::new(&mut self.steps_per_frame, 1..=32).text("Steps/Frame"));
-
-                ui.horizontal(|ui| {
-                    if ui.button("Step").clicked() {
-                        self.sim.step(self.sim_params());
                     }
-                    ui.checkbox(&mut self.auto_step, "Run");
-                });
 
-                if ui.button("Reset").clicked() {
-                    // Reset controls and RNG seed to deterministic defaults.
-                    self.radius = 1.0;
-                    self.sides = 32;
-                    self.view_mode = ViewMode::Fit;
-                    self.zoom_px_per_unit = 120.0;
-                    self.edge_regularization_enabled = true;
-                    self.edge_stiffness = 0.2;
-                    self.repulsion_enabled = true;
-                    self.repulsion_radius = 0.15;
-                    self.repulsion_strength = 0.01;
-                    self.growth_enabled = false;
-                    self.growth_rate = 0.001;
-                    self.split_enabled = false;
-                    self.split_length = 0.25;
-                    self.constraint_enabled = false;
-                    self.constraint_shape = ConstraintShape::Circle;
-                    self.constraint_size = 1.5;
-                    self.constraint_strength = 0.1;
-                    self.constraint_falloff = ConstraintFalloff::Linear;
-                    self.constraint_show = true;
-                    self.jitter_enabled = true;
-                    self.jitter_strength = 0.005;
-                    self.auto_step = false;
-                    self.steps_per_frame = 1;
-                    self.sim.reset_seed(0xD1FF_EA11_2026_0001);
-                    changed = true;
-                }
+                    left.separator();
+                    left.heading("Spacing");
+                    left.separator();
+                    left.checkbox(&mut self.edge_regularization_enabled, "Edge Regularization");
+                    left.add(
+                        egui::Slider::new(&mut self.target_edge_length, 0.0001..=2.0)
+                            .logarithmic(true)
+                            .text("Target Edge Length"),
+                    );
+                    left.add(
+                        egui::Slider::new(&mut self.edge_stiffness, 0.0..=1.0)
+                            .text("Edge Stiffness"),
+                    );
+                    if left.button("Set Target From Current Shape").clicked() {
+                        // Re-anchor target edge length to current geometry.
+                        self.target_edge_length = average_edge_length(self.sim.polygon());
+                    }
+
+                    left.separator();
+                    left.heading("Repulsion");
+                    left.separator();
+                    left.checkbox(&mut self.repulsion_enabled, "Self Repulsion");
+                    left.add(
+                        egui::Slider::new(&mut self.repulsion_radius, 0.0001..=2.0)
+                            .logarithmic(true)
+                            .text("Repulsion Radius"),
+                    );
+                    left.add(
+                        egui::Slider::new(&mut self.repulsion_strength, 0.0..=0.1)
+                            .text("Repulsion Strength"),
+                    );
+
+                    right.heading("Growth");
+                    right.separator();
+                    right.checkbox(&mut self.growth_enabled, "Normal Growth");
+                    right.add(
+                        egui::Slider::new(&mut self.growth_rate, -0.01..=0.01)
+                            .text("Growth Rate"),
+                    );
+
+                    right.separator();
+                    right.heading("Split");
+                    right.separator();
+                    right.checkbox(&mut self.split_enabled, "Split Long Edges");
+                    right.add(
+                        egui::Slider::new(&mut self.split_length, 0.005..=1.0)
+                            .logarithmic(true)
+                            .text("Split Length"),
+                    );
+
+                    right.separator();
+                    right.heading("Constraint");
+                    right.separator();
+                    right.checkbox(&mut self.constraint_enabled, "Constrain To Area");
+                    egui::ComboBox::from_label("Area Shape")
+                        .selected_text(match self.constraint_shape {
+                            ConstraintShape::Circle => "Circle",
+                            ConstraintShape::Square => "Square",
+                            ConstraintShape::Triangle => "Triangle",
+                        })
+                        .show_ui(right, |ui| {
+                            ui.selectable_value(
+                                &mut self.constraint_shape,
+                                ConstraintShape::Circle,
+                                "Circle",
+                            );
+                            ui.selectable_value(
+                                &mut self.constraint_shape,
+                                ConstraintShape::Square,
+                                "Square",
+                            );
+                            ui.selectable_value(
+                                &mut self.constraint_shape,
+                                ConstraintShape::Triangle,
+                                "Triangle",
+                            );
+                        });
+                    egui::ComboBox::from_label("Constraint Falloff")
+                        .selected_text(match self.constraint_falloff {
+                            ConstraintFalloff::Linear => "Linear",
+                            ConstraintFalloff::Quadratic => "Quadratic",
+                        })
+                        .show_ui(right, |ui| {
+                            ui.selectable_value(
+                                &mut self.constraint_falloff,
+                                ConstraintFalloff::Linear,
+                                "Linear",
+                            );
+                            ui.selectable_value(
+                                &mut self.constraint_falloff,
+                                ConstraintFalloff::Quadratic,
+                                "Quadratic",
+                            );
+                        });
+                    right.add(
+                        egui::Slider::new(&mut self.constraint_size, 0.1..=5.0)
+                            .logarithmic(true)
+                            .text("Area Size"),
+                    );
+                    right.add(
+                        egui::Slider::new(&mut self.constraint_strength, 0.0..=1.0)
+                            .text("Constraint Strength"),
+                    );
+                    right.checkbox(&mut self.constraint_show, "Show Area Overlay");
+
+                    right.separator();
+                    right.heading("Noise");
+                    right.separator();
+                    right.checkbox(&mut self.jitter_enabled, "Brownian Jitter");
+                    right.add(
+                        egui::Slider::new(&mut self.jitter_strength, 0.0..=0.05)
+                            .text("Jitter Strength"),
+                    );
+
+                    right.separator();
+                    right.heading("Stepping");
+                    right.separator();
+                    right.add(
+                        egui::Slider::new(&mut self.steps_per_frame, 1..=32).text("Steps/Frame"),
+                    );
+                    right.horizontal(|ui| {
+                        if ui.button("Step").clicked() {
+                            self.sim.step(self.sim_params());
+                        }
+                        ui.checkbox(&mut self.auto_step, "Run");
+                    });
+
+                    if right.button("Reset").clicked() {
+                        // Reset controls and RNG seed to deterministic defaults.
+                        self.radius = 1.0;
+                        self.sides = 32;
+                        self.view_mode = ViewMode::Fit;
+                        self.zoom_px_per_unit = 120.0;
+                        self.edge_regularization_enabled = true;
+                        self.edge_stiffness = 0.2;
+                        self.repulsion_enabled = true;
+                        self.repulsion_radius = 0.15;
+                        self.repulsion_strength = 0.01;
+                        self.growth_enabled = false;
+                        self.growth_rate = 0.001;
+                        self.split_enabled = false;
+                        self.split_length = 0.25;
+                        self.constraint_enabled = false;
+                        self.constraint_shape = ConstraintShape::Circle;
+                        self.constraint_size = 1.5;
+                        self.constraint_strength = 0.1;
+                        self.constraint_falloff = ConstraintFalloff::Linear;
+                        self.constraint_show = true;
+                        self.jitter_enabled = true;
+                        self.jitter_strength = 0.005;
+                        self.auto_step = false;
+                        self.steps_per_frame = 1;
+                        self.sim.reset_seed(0xD1FF_EA11_2026_0001);
+                        changed = true;
+                    }
+                });
 
                 if changed {
                     self.rebuild_polygon();
