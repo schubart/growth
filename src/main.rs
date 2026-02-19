@@ -1,6 +1,7 @@
 use dg4::geometry::{Polygon, Vec2};
 use dg4::sim::{
-    average_edge_length, regular_ngon_edge_length, ConstraintShape, SimParams, Simulation,
+    average_edge_length, regular_ngon_edge_length, ConstraintFalloff, ConstraintShape, SimParams,
+    Simulation,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind};
 
@@ -58,6 +59,7 @@ struct DgApp {
     constraint_shape: ConstraintShape,
     constraint_size: f64,
     constraint_strength: f64,
+    constraint_falloff: ConstraintFalloff,
     constraint_show: bool,
     // Brownian jitter controls.
     jitter_enabled: bool,
@@ -90,6 +92,7 @@ impl Default for DgApp {
             constraint_shape: ConstraintShape::Circle,
             constraint_size: 1.5,
             constraint_strength: 0.1,
+            constraint_falloff: ConstraintFalloff::Linear,
             constraint_show: true,
             jitter_enabled: true,
             jitter_strength: 0.005,
@@ -125,6 +128,7 @@ impl DgApp {
             constraint_shape: self.constraint_shape,
             constraint_size: self.constraint_size,
             constraint_strength: self.constraint_strength,
+            constraint_falloff: self.constraint_falloff,
             jitter_enabled: self.jitter_enabled,
             jitter_strength: self.jitter_strength,
         }
@@ -305,6 +309,23 @@ impl eframe::App for DgApp {
                         ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Square, "Square");
                         ui.selectable_value(&mut self.constraint_shape, ConstraintShape::Triangle, "Triangle");
                     });
+                egui::ComboBox::from_label("Constraint Falloff")
+                    .selected_text(match self.constraint_falloff {
+                        ConstraintFalloff::Linear => "Linear",
+                        ConstraintFalloff::Quadratic => "Quadratic",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.constraint_falloff,
+                            ConstraintFalloff::Linear,
+                            "Linear",
+                        );
+                        ui.selectable_value(
+                            &mut self.constraint_falloff,
+                            ConstraintFalloff::Quadratic,
+                            "Quadratic",
+                        );
+                    });
                 ui.add(
                     egui::Slider::new(&mut self.constraint_size, 0.1..=5.0)
                         .logarithmic(true)
@@ -350,6 +371,7 @@ impl eframe::App for DgApp {
                     self.constraint_shape = ConstraintShape::Circle;
                     self.constraint_size = 1.5;
                     self.constraint_strength = 0.1;
+                    self.constraint_falloff = ConstraintFalloff::Linear;
                     self.constraint_show = true;
                     self.jitter_enabled = true;
                     self.jitter_strength = 0.005;

@@ -19,6 +19,7 @@ pub struct SimParams {
     pub constraint_shape: ConstraintShape,
     pub constraint_size: f64,
     pub constraint_strength: f64,
+    pub constraint_falloff: ConstraintFalloff,
     pub jitter_enabled: bool,
     pub jitter_strength: f64,
 }
@@ -28,6 +29,12 @@ pub enum ConstraintShape {
     Circle,
     Square,
     Triangle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintFalloff {
+    Linear,
+    Quadratic,
 }
 
 #[derive(Debug)]
@@ -141,7 +148,11 @@ impl Simulation {
 
         if params.constraint_enabled && params.constraint_strength > 0.0 && params.constraint_size > 0.0 {
             for (i, p) in positions.iter().copied().enumerate() {
-                let push = constraint_push(p, params.constraint_shape, params.constraint_size);
+                let mut push = constraint_push(p, params.constraint_shape, params.constraint_size);
+                if push != Vec2::ZERO && params.constraint_falloff == ConstraintFalloff::Quadratic {
+                    let mag = push.length();
+                    push *= mag;
+                }
                 delta[i] += push * params.constraint_strength;
             }
         }
