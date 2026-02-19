@@ -397,34 +397,44 @@ impl eframe::App for DgApp {
                         ui.checkbox(&mut self.auto_step, "Run");
                     });
 
-                    if right.button("Reset").clicked() {
-                        // Reset controls and RNG seed to deterministic defaults.
-                        self.radius = 1.0;
-                        self.sides = 32;
-                        self.view_mode = ViewMode::Fit;
-                        self.zoom_px_per_unit = 120.0;
-                        self.edge_regularization_enabled = true;
-                        self.edge_stiffness = 0.2;
-                        self.repulsion_enabled = true;
-                        self.repulsion_radius = 0.15;
-                        self.repulsion_strength = 0.01;
-                        self.growth_enabled = false;
-                        self.growth_rate = 0.001;
-                        self.split_enabled = false;
-                        self.split_length = 0.25;
-                        self.constraint_enabled = false;
-                        self.constraint_shape = ConstraintShape::Circle;
-                        self.constraint_size = 1.5;
-                        self.constraint_strength = 0.1;
-                        self.constraint_falloff = ConstraintFalloff::Linear;
-                        self.constraint_show = true;
-                        self.jitter_enabled = true;
-                        self.jitter_strength = 0.005;
-                        self.auto_step = false;
-                        self.steps_per_frame = 1;
-                        self.sim.reset_seed(0xD1FF_EA11_2026_0001);
-                        changed = true;
-                    }
+                    right.horizontal(|ui| {
+                        if ui.button("Reset Geometry").clicked() {
+                            // Reset only the starter shape and RNG; preserve all other settings.
+                            self.radius = 1.0;
+                            self.sides = 32;
+                            self.sim.reset_seed(0xD1FF_EA11_2026_0001);
+                            changed = true;
+                        }
+
+                        if ui.button("Reset All").clicked() {
+                            // Reset controls and RNG seed to deterministic defaults.
+                            self.radius = 1.0;
+                            self.sides = 32;
+                            self.view_mode = ViewMode::Fit;
+                            self.zoom_px_per_unit = 120.0;
+                            self.edge_regularization_enabled = true;
+                            self.edge_stiffness = 0.2;
+                            self.repulsion_enabled = true;
+                            self.repulsion_radius = 0.15;
+                            self.repulsion_strength = 0.01;
+                            self.growth_enabled = false;
+                            self.growth_rate = 0.001;
+                            self.split_enabled = false;
+                            self.split_length = 0.25;
+                            self.constraint_enabled = false;
+                            self.constraint_shape = ConstraintShape::Circle;
+                            self.constraint_size = 1.5;
+                            self.constraint_strength = 0.1;
+                            self.constraint_falloff = ConstraintFalloff::Linear;
+                            self.constraint_show = true;
+                            self.jitter_enabled = true;
+                            self.jitter_strength = 0.005;
+                            self.auto_step = false;
+                            self.steps_per_frame = 1;
+                            self.sim.reset_seed(0xD1FF_EA11_2026_0001);
+                            changed = true;
+                        }
+                    });
                 });
 
                 if changed {
