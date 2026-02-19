@@ -15,24 +15,6 @@ impl Polygon {
         Self::default()
     }
 
-    pub fn with_vertices(vertices: Vec<Vec2>) -> Self {
-        Self { vertices }
-    }
-
-    pub fn from_tuples(points: impl IntoIterator<Item = (Real, Real)>) -> Self {
-        // Convert plain tuples into vector math coordinates.
-        let vertices = points.into_iter().map(|(x, y)| Vec2::new(x, y)).collect();
-        Self { vertices }
-    }
-
-    pub fn push(&mut self, vertex: Vec2) {
-        self.vertices.push(vertex);
-    }
-
-    pub fn clear(&mut self) {
-        self.vertices.clear();
-    }
-
     pub fn len(&self) -> usize {
         self.vertices.len()
     }
@@ -49,16 +31,6 @@ impl Polygon {
         &mut self.vertices
     }
 
-    pub fn square(half_extent: Real) -> Self {
-        // Axis-aligned square centered at the origin.
-        Self::from_tuples([
-            (-half_extent, -half_extent),
-            (half_extent, -half_extent),
-            (half_extent, half_extent),
-            (-half_extent, half_extent),
-        ])
-    }
-
     pub fn regular_ngon(radius: Real, sides: usize) -> Self {
         if sides < 3 || radius <= 0.0 {
             return Self::new();
@@ -70,7 +42,7 @@ impl Polygon {
             let t = TAU * (i as Real) / (sides as Real);
             vertices.push(Vec2::new(radius * t.cos(), radius * t.sin()));
         }
-        Self::with_vertices(vertices)
+        Self { vertices }
     }
 
     pub fn perimeter(&self) -> Real {
