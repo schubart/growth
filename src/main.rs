@@ -3,7 +3,7 @@ use dg4::sim::{
     average_edge_length, regular_ngon_edge_length, ConstraintFalloff, ConstraintShape, SimParams,
     Simulation,
 };
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind};
+use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke};
 
 // Launch a native egui desktop window.
 fn main() -> Result<(), eframe::Error> {
@@ -198,21 +198,25 @@ impl DgApp {
         if constraint_show && constraint_size > 0.0 {
             let fill = Color32::from_rgba_premultiplied(90, 120, 140, 28);
             let stroke = Stroke::new(1.0, Color32::from_rgba_premultiplied(120, 160, 180, 80));
+            let constraint_center = to_screen(Vec2::ZERO);
 
             match constraint_shape {
                 ConstraintShape::Circle => {
                     let radius = (constraint_size * scale) as f32;
-                    painter.circle_filled(rect.center(), radius, fill);
-                    painter.circle_stroke(rect.center(), radius, stroke);
+                    painter.circle_filled(constraint_center, radius, fill);
+                    painter.circle_stroke(constraint_center, radius, stroke);
                 }
                 ConstraintShape::Square => {
-                    let half = (constraint_size * scale) as f32;
-                    let square = Rect::from_min_max(
-                        Pos2::new(rect.center().x - half, rect.center().y - half),
-                        Pos2::new(rect.center().x + half, rect.center().y + half),
-                    );
-                    painter.rect_filled(square, 0.0, fill);
-                    painter.rect_stroke(square, 0.0, stroke, StrokeKind::Inside);
+                    let vertices = [
+                        Vec2::new(-constraint_size, -constraint_size),
+                        Vec2::new(constraint_size, -constraint_size),
+                        Vec2::new(constraint_size, constraint_size),
+                        Vec2::new(-constraint_size, constraint_size),
+                    ];
+                    let mut points: Vec<Pos2> = vertices.iter().copied().map(to_screen).collect();
+                    painter.add(Shape::convex_polygon(points.clone(), fill, Stroke::NONE));
+                    points.push(points[0]);
+                    painter.add(Shape::line(points, stroke));
                 }
                 ConstraintShape::Triangle => {
                     let vertices = [
