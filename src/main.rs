@@ -81,6 +81,7 @@ struct DgApp {
     steps_per_frame: usize,
     // Simulation state.
     sim: Simulation,
+    pending_rebuild: bool,
 }
 
 impl Default for DgApp {
@@ -111,6 +112,7 @@ impl Default for DgApp {
             auto_step: true,
             steps_per_frame: 1,
             sim: Simulation::new(0xD1FF_EA11_2026_0001),
+            pending_rebuild: false,
         };
         app.rebuild_polygon();
         app
@@ -144,6 +146,11 @@ impl DgApp {
             jitter_enabled: self.jitter_enabled,
             jitter_strength: self.jitter_strength,
         }
+    }
+
+    fn input_in_progress(ctx: &egui::Context) -> bool {
+        // Treat slider drags and focused numeric text-edit fields as in-progress edits.
+        ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some())
     }
 
     // Draw polygon in viewport with either fit or fixed zoom mapping.
@@ -438,7 +445,12 @@ impl eframe::App for DgApp {
                 });
 
                 if changed {
+                    self.pending_rebuild = true;
+                }
+
+                if self.pending_rebuild && !Self::input_in_progress(ctx) {
                     self.rebuild_polygon();
+                    self.pending_rebuild = false;
                 }
 
                 ui.separator();
@@ -454,7 +466,7 @@ impl eframe::App for DgApp {
                 }
             });
 
-        if self.auto_step {
+        if self.auto_step && !Self::input_in_progress(ctx) {
             // Advance multiple steps per frame for faster evolution.
             for _ in 0..self.steps_per_frame {
                 self.sim.step(self.sim_params());
