@@ -130,7 +130,7 @@ impl Simulation {
 
         if params.growth_enabled && params.growth_rate != 0.0 {
             let area = signed_area(&positions);
-            let outward_sign = if area >= 0.0 { -1.0 } else { 1.0 };
+            let outward_sign = if area >= 0.0 { 1.0 } else { -1.0 };
 
             for i in 0..n {
                 let prev = positions[(i + n - 1) % n];
